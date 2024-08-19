@@ -1,0 +1,84 @@
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+from base64 import urlsafe_b64encode, urlsafe_b64decode
+import os
+
+def derive_key(password: bytes, salt: bytes, length: int = 32) -> bytes:
+    # Derive a key using PBKDF2HMAC or Scrypt for better security
+    kdf = Scrypt(
+        salt=salt,
+        length=length,
+        n=2**14,
+        r=8,
+        p=1,
+        backend=default_backend()
+    )
+    key = kdf.derive(password)
+    return key
+
+def encrypt_file(input_file: str, output_file: str, password: str):
+    # Generate a random salt
+    salt = os.urandom(16)
+
+    # Derive a key from the password
+    key = derive_key(password.encode(), salt)
+
+    # Generate a random IV
+    iv = os.urandom(16)
+
+    # Create the cipher object
+    cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+    encryptor = cipher.encryptor()
+
+    # Read the file content
+    with open(input_file, 'rb') as f:
+        data = f.read()
+
+    # Pad the data to make it a multiple of the block size (16 bytes)
+    padder = padding.PKCS7(algorithms.AES.block_size).padder()
+    padded_data = padder.update(data) + padder.finalize()
+
+    # Encrypt the padded data
+    encrypted_data = encryptor.update(padded_data) + encryptor.finalize()
+
+    # Write the salt, iv, and encrypted data to the output file
+    with open(output_file, 'wb') as f:
+        f.write(salt + iv + encrypted_data)
+
+    print(f"File '{input_file}' has been encrypted and saved as '{output_file}'.")
+
+def decrypt_file(input_file: str, output_file: str, password: str):
+    # Read the encrypted file
+    with open(input_file, 'rb') as f:
+        salt = f.read(16)  # First 16 bytes are the salt
+        iv = f.read(16)    # Next 16 bytes are the IV
+        encrypted_data = f.read()
+
+    # Derive the same key using the salt and password
+    key = derive_key(password.encode(), salt)
+
+    # Create the cipher object
+    cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+    decryptor = cipher.decryptor()
+
+    # Decrypt the data
+    padded_data = decryptor.update(encrypted_data) + decryptor.finalize()
+
+    # Unpad the data
+    unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
+    data = unpadder.update(padded_data) + unpadder.finalize()
+
+    # Write the decrypted data to the output file
+    with open(output_file, 'wb') as f:
+        f.write(data)
+
+    print(f"File '{input_file}' has been decrypted and saved as '{output_file}'.")
+
+# Example usage:
+password = "strongpassword"  # Use a strong password
+encrypt_file('input.txt', 'encrypted.dat', password)
+decrypt_file('encrypted.dat', 'decrypted.txt', password)
